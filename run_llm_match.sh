@@ -9,6 +9,23 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# --- locate a Java runtime (macOS's /usr/bin/java is only a stub) ---------------------
+if ! java -version >/dev/null 2>&1; then
+  for cand in \
+      "${JAVA_HOME:-}/bin/java" \
+      "$(/usr/libexec/java_home 2>/dev/null || true)/bin/java" \
+      /Library/Java/JavaVirtualMachines/*/Contents/Home/bin/java \
+      /usr/local/opt/openjdk*/bin/java /opt/homebrew/opt/openjdk*/bin/java \
+      /usr/lib/jvm/*/bin/java; do
+    if [ -x "$cand" ] 2>/dev/null && "$cand" -version >/dev/null 2>&1; then
+      export PATH="$(dirname "$cand"):$PATH"; echo "Using Java at $cand"; break
+    fi
+  done
+fi
+if ! java -version >/dev/null 2>&1; then
+  echo "ERROR: no Java runtime found. Install a JDK 11+ (e.g. 'brew install --cask temurin', or the .pkg from https://adoptium.net) and rerun."; exit 1
+fi
+
 if command -v javac >/dev/null 2>&1; then
   mkdir -p out
   find src -name '*.java' > out/sources.txt
