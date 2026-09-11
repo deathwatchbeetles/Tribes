@@ -19,3 +19,9 @@ llm_bridge/.venv/
 llm_bridge/bridge.log
 _to_delete/
 out/
+
+llm_bridge/.env
+llm_bridge/.venv/
+llm_bridge/bridge.log
+_to_delete/
+out/
