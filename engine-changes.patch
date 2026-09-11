@@ -1,0 +1,140 @@
+diff --git a/play.json b/play.json
+index fe8ede7..ba2c1a3 100644
+--- a/play.json
++++ b/play.json
+@@ -1,23 +1,29 @@
+ {
+-  "Run Mode" : "PlayLG",
+-  "Run Mode comment" : "PlayLG / PlayFile / Replay",
+-  "Progressive Bias" : true,
+-  "Pruning" : true,
++  "Run Mode": "PlayFile",
++  "Run Mode comment": "PlayLG / PlayFile / Replay",
++  "Progressive Bias": true,
++  "Pruning": true,
+   "K init mult": 0.5,
+   "T mult": 2.0,
+   "A mult": 1.5,
+   "B": 1.3,
+-  "Game Mode" : "Capitals",
+-  "Rollouts" : false,
+-  "Search Depth" : 20,
+-  "Force End" : false,
+-  "Population Size" : 1,
+-  "Players" : ["OEP", "pMCTS"],
+-  "Tribes" : ["Xin Xi", "Imperius"],
+-  "Verbose" : false,
+-  "Replay File Name" : "save/1590072023986/0_0/game.json",
+-  "Level File" : "levels/SampleLevel.csv",
+-  "Game Seed" : "-1",
+-  "Agents Seed" : "-1",
+-  "Level Seed" : "-1"
++  "Game Mode": "Capitals",
++  "Rollouts": false,
++  "Search Depth": 20,
++  "Force End": false,
++  "Population Size": 1,
++  "Players": [
++    "LLM_PLAYER",
++    "Rule Based"
++  ],
++  "Tribes": [
++    "Xin Xi",
++    "Imperius"
++  ],
++  "Verbose": false,
++  "Replay File Name": "save/1590072023986/0_0/game.json",
++  "Level File": "levels/SampleLevel2p.csv",
++  "Game Seed": "-1",
++  "Agents Seed": "-1",
++  "Level Seed": "-1"
+ }
+\ No newline at end of file
+diff --git a/src/Play.java b/src/Play.java
+index 04bb56c..4e81c98 100644
+--- a/src/Play.java
++++ b/src/Play.java
+@@ -35,12 +35,37 @@ public class Play {
+     private static long AGENT_SEED = -1;
+     private static long GAME_SEED = -1;
+ 
++    /* ---------------- Default LLM test match (used with --llm or when play.json is missing) ---------------- */
++    /** Small 11x11 two-player map so an LLM-vs-rule-based game finishes quickly. */
++    private static final String DEFAULT_LLM_LEVEL = "levels/SampleLevel2p.csv";
++    private static final Run.PlayerType[] DEFAULT_LLM_PLAYERS = { Run.PlayerType.LLM_PLAYER, Run.PlayerType.RULE_BASED };
++    private static final Types.GAME_MODE DEFAULT_LLM_MODE = CAPITALS;
++
+     public static void main(String[] args) {
+ 
++        boolean forceLLM = false;
++        for (String a : args) {
++            if (a.equalsIgnoreCase("--nogui") || a.equalsIgnoreCase("--headless")) Constants.VISUALS = false;
++            if (a.equalsIgnoreCase("--llm")) forceLLM = true;
++            if (a.startsWith("--max-turns=")) Constants.MAX_TURNS_CAPITALS = Integer.parseInt(a.substring("--max-turns=".length()));
++        }
++
+         try {
+-            JSONObject config = new IO().readJSON("play.json");
++            JSONObject config = forceLLM ? null : new IO().readJSON("play.json");
++
++            if (config == null || config.isEmpty()) {
++                // No config (or --llm requested): run the default LLM_PLAYER vs RULE_BASED match.
++                System.out.println("Running default match: " + Arrays.toString(DEFAULT_LLM_PLAYERS)
++                        + " on " + DEFAULT_LLM_LEVEL + " (" + DEFAULT_LLM_MODE + ", max "
++                        + Constants.MAX_TURNS_CAPITALS + " turns, visuals=" + Constants.VISUALS + ")");
++                Constants.VERBOSE = false;      // keep the engine quiet so the LLM log is readable
++                Run.MAX_LENGTH = 20; Run.FORCE_TURN_END = false; Run.MCTS_ROLLOUTS = false; Run.POP_SIZE = 1;
++                Run.PRUNING = true; Run.PROGBIAS = true;
++                play(DEFAULT_LLM_LEVEL, DEFAULT_LLM_PLAYERS, DEFAULT_LLM_MODE);
++                return;
++            }
+ 
+-            if (config != null && !config.isEmpty()) {
++            {
+                 String runMode = config.getString("Run Mode");
+                 Constants.VERBOSE = config.getBoolean("Verbose");
+ 
+@@ -99,8 +124,6 @@ public class Play {
+                     System.out.println("ERROR: run mode '" + runMode + "' not recognized.");
+                 }
+ 
+-            } else {
+-                System.out.println("ERROR: Couldn't find 'play.json'");
+             }
+         }catch(Exception e)
+         {
+diff --git a/src/Run.java b/src/Run.java
+index 57ae670..f53cd64 100644
+--- a/src/Run.java
++++ b/src/Run.java
+@@ -70,7 +70,9 @@ class Run {
+         RHEA,
+         OEP,
+         EMCTS,
+-        PORTFOLIO_MCTS
++        PORTFOLIO_MCTS,
++        LLM_PLAYER,
++        RULE_BASED  // alias of SIMPLE (the built-in rule-based agent), kept for readability
+     }
+ 
+     public static double K_INIT_MULT = 0.5;
+@@ -102,6 +104,8 @@ class Run {
+             case "OEP": return Run.PlayerType.OEP;
+             case "pMCTS": return Run.PlayerType.PORTFOLIO_MCTS;
+             case "EMCTS": return Run.PlayerType.EMCTS;
++            case "LLM":
++            case "LLM_PLAYER": return Run.PlayerType.LLM_PLAYER;
+         }
+         throw new Exception("Error: unrecognized Player Type: " + arg);
+     }
+@@ -142,7 +146,9 @@ class Run {
+         {
+             case DONOTHING: return new DoNothingAgent(agentSeed);
+             case RANDOM: return new RandomAgent(agentSeed);
+-            case SIMPLE: return new SimpleAgent(agentSeed);
++            case SIMPLE:
++            case RULE_BASED: return new SimpleAgent(agentSeed);
++            case LLM_PLAYER: return new LLMAgent(agentSeed);
+             case OSLA:
+                 OSLAParams oslaParams = new OSLAParams();
+                 oslaParams.stop_type = oslaParams.STOP_FMCALLS; //Upper bound
